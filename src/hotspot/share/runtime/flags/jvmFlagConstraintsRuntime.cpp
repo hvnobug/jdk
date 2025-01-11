@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,10 +32,25 @@
 #include "runtime/task.hpp"
 #include "utilities/powerOfTwo.hpp"
 
-JVMFlag::Error ObjectAlignmentInBytesConstraintFunc(intx value, bool verbose) {
+JVMFlag::Error AOTModeConstraintFunc(ccstr value, bool verbose) {
+  if (strcmp(value, "off") != 0 &&
+      strcmp(value, "record") != 0 &&
+      strcmp(value, "create") != 0 &&
+      strcmp(value, "auto") != 0 &&
+      strcmp(value, "on") != 0) {
+    JVMFlag::printError(verbose,
+                        "Unrecognized value %s for AOTMode. Must be one of the following: "
+                        "off, record, create, auto, on\n",
+                        value);
+    return JVMFlag::VIOLATES_CONSTRAINT;
+  }
+
+  return JVMFlag::SUCCESS;
+}
+JVMFlag::Error ObjectAlignmentInBytesConstraintFunc(int value, bool verbose) {
   if (!is_power_of_2(value)) {
     JVMFlag::printError(verbose,
-                        "ObjectAlignmentInBytes (" INTX_FORMAT ") must be "
+                        "ObjectAlignmentInBytes (%d) must be "
                         "power of 2\n",
                         value);
     return JVMFlag::VIOLATES_CONSTRAINT;
@@ -43,8 +58,8 @@ JVMFlag::Error ObjectAlignmentInBytesConstraintFunc(intx value, bool verbose) {
   // In case page size is very small.
   if (value >= (intx)os::vm_page_size()) {
     JVMFlag::printError(verbose,
-                        "ObjectAlignmentInBytes (" INTX_FORMAT ") must be "
-                        "less than page size (%d)\n",
+                        "ObjectAlignmentInBytes (%d) must be "
+                        "less than page size (" SIZE_FORMAT ")\n",
                         value, os::vm_page_size());
     return JVMFlag::VIOLATES_CONSTRAINT;
   }
@@ -53,10 +68,10 @@ JVMFlag::Error ObjectAlignmentInBytesConstraintFunc(intx value, bool verbose) {
 
 // Need to enforce the padding not to break the existing field alignments.
 // It is sufficient to check against the largest type size.
-JVMFlag::Error ContendedPaddingWidthConstraintFunc(intx value, bool verbose) {
+JVMFlag::Error ContendedPaddingWidthConstraintFunc(int value, bool verbose) {
   if ((value % BytesPerLong) != 0) {
     JVMFlag::printError(verbose,
-                        "ContendedPaddingWidth (" INTX_FORMAT ") must be "
+                        "ContendedPaddingWidth (%d) must be "
                         "a multiple of %d\n",
                         value, BytesPerLong);
     return JVMFlag::VIOLATES_CONSTRAINT;
@@ -65,10 +80,10 @@ JVMFlag::Error ContendedPaddingWidthConstraintFunc(intx value, bool verbose) {
   }
 }
 
-JVMFlag::Error PerfDataSamplingIntervalFunc(intx value, bool verbose) {
+JVMFlag::Error PerfDataSamplingIntervalFunc(int value, bool verbose) {
   if ((value % PeriodicTask::interval_gran != 0)) {
     JVMFlag::printError(verbose,
-                        "PerfDataSamplingInterval (" INTX_FORMAT ") must be "
+                        "PerfDataSamplingInterval (%d) must be "
                         "evenly divisible by PeriodicTask::interval_gran (%d)\n",
                         value, PeriodicTask::interval_gran);
     return JVMFlag::VIOLATES_CONSTRAINT;

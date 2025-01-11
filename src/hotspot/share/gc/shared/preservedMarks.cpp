@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,7 @@
  */
 
 #include "precompiled.hpp"
+#include "gc/shared/fullGCForwarding.inline.hpp"
 #include "gc/shared/preservedMarks.inline.hpp"
 #include "gc/shared/workerThread.hpp"
 #include "gc/shared/workerUtils.hpp"
@@ -34,21 +35,24 @@
 
 void PreservedMarks::restore() {
   while (!_stack.is_empty()) {
-    const OopAndMarkWord elem = _stack.pop();
+    const PreservedMark elem = _stack.pop();
     elem.set_mark();
   }
   assert_empty();
 }
 
-void PreservedMarks::adjust_during_full_gc() {
-  StackIterator<OopAndMarkWord, mtGC> iter(_stack);
-  while (!iter.is_empty()) {
-    OopAndMarkWord* elem = iter.next_addr();
+void PreservedMarks::adjust_preserved_mark(PreservedMark* elem) {
+  oop obj = elem->get_oop();
+  if (FullGCForwarding::is_forwarded(obj)) {
+    elem->set_oop(FullGCForwarding::forwardee(obj));
+  }
+}
 
-    oop obj = elem->get_oop();
-    if (obj->is_forwarded()) {
-      elem->set_oop(obj->forwardee());
-    }
+void PreservedMarks::adjust_during_full_gc() {
+  StackIterator<PreservedMark, mtGC> iter(_stack);
+  while (!iter.is_empty()) {
+    PreservedMark* elem = iter.next_addr();
+    adjust_preserved_mark(elem);
   }
 }
 
@@ -70,12 +74,6 @@ void PreservedMarks::assert_empty() {
          _stack.cache_size());
 }
 #endif // ndef PRODUCT
-
-void RemoveForwardedPointerClosure::do_object(oop obj) {
-  if (obj->is_forwarded()) {
-    PreservedMarks::init_forwarded_mark(obj);
-  }
-}
 
 void PreservedMarksSet::init(uint num) {
   assert(_stacks == nullptr && _num == 0, "do not re-initialize");
@@ -125,8 +123,10 @@ public:
 
   ~RestorePreservedMarksTask() {
     assert(_total_size == _total_size_before, "total_size = %zu before = %zu", _total_size, _total_size_before);
-
-    log_trace(gc)("Restored %zu marks", _total_size);
+    size_t mem_size = _total_size * (sizeof(oop) + sizeof(markWord));
+    log_trace(gc)("Restored %zu marks, occupying %zu %s", _total_size,
+                                                          byte_size_in_proper_unit(mem_size),
+                                                          proper_unit_for_byte_size(mem_size));
   }
 };
 
@@ -141,10 +141,6 @@ void PreservedMarksSet::restore(WorkerThreads* workers) {
   }
 
   assert_empty();
-}
-
-WorkerTask* PreservedMarksSet::create_task() {
-  return new RestorePreservedMarksTask(this);
 }
 
 void PreservedMarksSet::reclaim() {

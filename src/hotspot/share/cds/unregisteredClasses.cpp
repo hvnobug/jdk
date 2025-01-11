@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,16 +43,15 @@
 // the "source:" in the class list file (see classListParser.cpp), and can be a directory or
 // a JAR file.
 InstanceKlass* UnregisteredClasses::load_class(Symbol* name, const char* path, TRAPS) {
-  assert(name != NULL, "invariant");
-  assert(DumpSharedSpaces, "this function is only used with -Xshare:dump");
+  assert(name != nullptr, "invariant");
+  assert(CDSConfig::is_dumping_static_archive(), "this function is only used with -Xshare:dump");
 
-  {
-    PerfClassTraceTime vmtimer(ClassLoader::perf_sys_class_lookup_time(),
-                               THREAD->get_thread_stat()->perf_timers_addr(),
-                               PerfClassTraceTime::CLASS_LOAD);
-  }
+  PerfClassTraceTime vmtimer(ClassLoader::perf_app_classload_time(),
+                             THREAD->get_thread_stat()->perf_timers_addr(),
+                             PerfClassTraceTime::CLASS_LOAD);
 
   Symbol* path_symbol = SymbolTable::new_symbol(path);
+  Symbol* findClass = SymbolTable::new_symbol("findClass");
   Handle url_classloader = get_url_classloader(path_symbol, CHECK_NULL);
   Handle ext_class_name = java_lang_String::externalize_classname(name, CHECK_NULL);
 
@@ -60,11 +59,10 @@ InstanceKlass* UnregisteredClasses::load_class(Symbol* name, const char* path, T
   JavaCallArguments args(2);
   args.set_receiver(url_classloader);
   args.push_oop(ext_class_name);
-  args.push_int(JNI_FALSE);
   JavaCalls::call_virtual(&result,
                           vmClasses::URLClassLoader_klass(),
-                          vmSymbols::loadClass_name(),
-                          vmSymbols::string_boolean_class_signature(),
+                          findClass,
+                          vmSymbols::string_class_signature(),
                           &args,
                           CHECK_NULL);
   assert(result.get_type() == T_OBJECT, "just checking");
@@ -75,9 +73,9 @@ InstanceKlass* UnregisteredClasses::load_class(Symbol* name, const char* path, T
 class URLClassLoaderTable : public ResourceHashtable<
   Symbol*, OopHandle,
   137, // prime number
-  ResourceObj::C_HEAP> {};
+  AnyObj::C_HEAP> {};
 
-static URLClassLoaderTable* _url_classloader_table = NULL;
+static URLClassLoaderTable* _url_classloader_table = nullptr;
 
 Handle UnregisteredClasses::create_url_classloader(Symbol* path, TRAPS) {
   ResourceMark rm(THREAD);
@@ -101,11 +99,11 @@ Handle UnregisteredClasses::create_url_classloader(Symbol* path, TRAPS) {
 }
 
 Handle UnregisteredClasses::get_url_classloader(Symbol* path, TRAPS) {
-  if (_url_classloader_table == NULL) {
-    _url_classloader_table = new (ResourceObj::C_HEAP, mtClass)URLClassLoaderTable();
+  if (_url_classloader_table == nullptr) {
+    _url_classloader_table = new (mtClass)URLClassLoaderTable();
   }
   OopHandle* url_classloader_ptr = _url_classloader_table->get(path);
-  if (url_classloader_ptr != NULL) {
+  if (url_classloader_ptr != nullptr) {
     return Handle(THREAD, (*url_classloader_ptr).resolve());
   } else {
     Handle url_classloader = create_url_classloader(path, CHECK_NH);

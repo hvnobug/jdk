@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,7 +39,7 @@
 Node* CardTableBarrierSetC2::byte_map_base_node(GraphKit* kit) const {
   // Get base of card map
   CardTable::CardValue* card_table_base = ci_card_table_address();
-   if (card_table_base != NULL) {
+   if (card_table_base != nullptr) {
      return kit->makecon(TypeRawPtr::make((address)card_table_base));
    } else {
      return kit->null();
@@ -58,8 +58,8 @@ void CardTableBarrierSetC2::post_barrier(GraphKit* kit,
                                          Node* val,
                                          BasicType bt,
                                          bool use_precise) const {
-  // No store check needed if we're storing a NULL.
-  if (val != NULL && val->is_Con()) {
+  // No store check needed if we're storing a null.
+  if (val != nullptr && val->is_Con()) {
     const Type* t = val->bottom_type();
     if (t == TypePtr::NULL_PTR || t == Type::TOP) {
       return;
@@ -83,7 +83,7 @@ void CardTableBarrierSetC2::post_barrier(GraphKit* kit,
     // Else it's an array (or unknown), and we want more precise card marks.
   }
 
-  assert(adr != NULL, "");
+  assert(adr != nullptr, "");
 
   IdealKit ideal(kit, true);
 
@@ -125,37 +125,8 @@ void CardTableBarrierSetC2::post_barrier(GraphKit* kit,
   kit->final_sync(ideal);
 }
 
-void CardTableBarrierSetC2::clone(GraphKit* kit, Node* src, Node* dst, Node* size, bool is_array) const {
-  BarrierSetC2::clone(kit, src, dst, size, is_array);
-  const TypePtr* raw_adr_type = TypeRawPtr::BOTTOM;
-
-  // If necessary, emit some card marks afterwards.  (Non-arrays only.)
-  bool card_mark = !is_array && !use_ReduceInitialCardMarks();
-  if (card_mark) {
-    assert(!is_array, "");
-    // Put in store barrier for any and all oops we are sticking
-    // into this object.  (We could avoid this if we could prove
-    // that the object type contains no oop fields at all.)
-    Node* no_particular_value = NULL;
-    Node* no_particular_field = NULL;
-    int raw_adr_idx = Compile::AliasIdxRaw;
-    post_barrier(kit, kit->control(),
-                 kit->memory(raw_adr_type),
-                 dst,
-                 no_particular_field,
-                 raw_adr_idx,
-                 no_particular_value,
-                 T_OBJECT,
-                 false);
-  }
-}
-
 bool CardTableBarrierSetC2::use_ReduceInitialCardMarks() const {
   return ReduceInitialCardMarks;
-}
-
-bool CardTableBarrierSetC2::is_gc_barrier_node(Node* node) const {
-  return ModRefBarrierSetC2::is_gc_barrier_node(node) || node->Opcode() == Op_StoreCM;
 }
 
 void CardTableBarrierSetC2::eliminate_gc_barrier(PhaseMacroExpand* macro, Node* node) const {

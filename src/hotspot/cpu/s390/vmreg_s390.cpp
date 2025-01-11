@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2016 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -43,12 +43,17 @@ void VMRegImpl::set_regName() {
     regName[i++] = freg->name();
     freg = freg->successor();
   }
+
+  VectorRegister vreg = ::as_VectorRegister(0);
+  for (; i < ConcreteRegisterImpl::max_vr;) {
+    regName[i++] = vreg->name();
+    regName[i++] = vreg->name();
+    regName[i++] = vreg->name();
+    regName[i++] = vreg->name();
+    vreg = vreg->successor();
+  }
+
   for (; i < ConcreteRegisterImpl::number_of_registers; i ++) {
     regName[i] = "NON-GPR-XMM";
   }
-}
-
-VMReg VMRegImpl::vmStorageToVMReg(int type, int index) {
-  Unimplemented();
-  return VMRegImpl::Bad();
 }

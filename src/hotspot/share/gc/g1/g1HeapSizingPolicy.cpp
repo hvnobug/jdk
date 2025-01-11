@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,9 +23,10 @@
  */
 
 #include "precompiled.hpp"
+#include "gc/g1/g1Analytics.hpp"
 #include "gc/g1/g1CollectedHeap.hpp"
 #include "gc/g1/g1HeapSizingPolicy.hpp"
-#include "gc/g1/g1Analytics.hpp"
+#include "gc/shared/gc_globals.hpp"
 #include "logging/log.hpp"
 #include "runtime/globals.hpp"
 #include "utilities/debug.hpp"
@@ -122,7 +123,7 @@ size_t G1HeapSizingPolicy::young_collection_expansion_amount() {
   bool filled_history_buffer = _pauses_since_start == _num_prev_pauses_for_heuristics;
   if ((_ratio_over_threshold_count == MinOverThresholdForGrowth) ||
       (filled_history_buffer && (long_term_pause_time_ratio > threshold))) {
-    size_t min_expand_bytes = HeapRegion::GrainBytes;
+    size_t min_expand_bytes = G1HeapRegion::GrainBytes;
     size_t reserved_bytes = _g1h->max_capacity();
     size_t committed_bytes = _g1h->capacity();
     size_t uncommitted_bytes = reserved_bytes - committed_bytes;
@@ -197,6 +198,14 @@ size_t G1HeapSizingPolicy::young_collection_expansion_amount() {
 }
 
 static size_t target_heap_capacity(size_t used_bytes, uintx free_ratio) {
+  assert(free_ratio <= 100, "precondition");
+  if (free_ratio == 100) {
+    // If 100 then below calculations will divide by zero and return min of
+    // resulting infinity and MaxHeapSize.  Avoid issues of UB vs is_iec559
+    // and ubsan warnings, and just immediately return MaxHeapSize.
+    return MaxHeapSize;
+  }
+
   const double desired_free_percentage = (double) free_ratio / 100.0;
   const double desired_used_percentage = 1.0 - desired_free_percentage;
 
@@ -216,7 +225,14 @@ size_t G1HeapSizingPolicy::full_collection_resize_amount(bool& expand) {
   // Capacity, free and used after the GC counted as full regions to
   // include the waste in the following calculations.
   const size_t capacity_after_gc = _g1h->capacity();
-  const size_t used_after_gc = capacity_after_gc - _g1h->unused_committed_regions_in_bytes();
+  const size_t used_after_gc = capacity_after_gc -
+                               _g1h->unused_committed_regions_in_bytes() -
+                               // Discount space used by current Eden to establish a
+                               // situation during Remark similar to at the end of full
+                               // GC where eden is empty. During Remark there can be an
+                               // arbitrary number of eden regions which would skew the
+                               // results.
+                               _g1h->eden_regions_count() * G1HeapRegion::GrainBytes;
 
   size_t minimum_desired_capacity = target_heap_capacity(used_after_gc, MinHeapFreeRatio);
   size_t maximum_desired_capacity = target_heap_capacity(used_after_gc, MaxHeapFreeRatio);
@@ -265,4 +281,3 @@ size_t G1HeapSizingPolicy::full_collection_resize_amount(bool& expand) {
   expand = true; // Does not matter.
   return 0;
 }
-

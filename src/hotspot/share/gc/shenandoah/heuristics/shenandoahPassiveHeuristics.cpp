@@ -31,6 +31,9 @@
 #include "logging/log.hpp"
 #include "logging/logTag.hpp"
 
+ShenandoahPassiveHeuristics::ShenandoahPassiveHeuristics(ShenandoahSpaceInfo* space_info) :
+  ShenandoahHeuristics(space_info) {}
+
 bool ShenandoahPassiveHeuristics::should_start_gc() {
   // Never do concurrent GCs.
   return false;
@@ -53,7 +56,7 @@ void ShenandoahPassiveHeuristics::choose_collection_set_from_regiondata(Shenando
 
   // Do not select too large CSet that would overflow the available free space.
   // Take at least the entire evacuation reserve, and be free to overflow to free space.
-  size_t max_capacity = ShenandoahHeap::heap()->max_capacity();
+  size_t max_capacity = _space_info->max_capacity();
   size_t available = MAX2(max_capacity / 100 * ShenandoahEvacReserve, actual_free);
   size_t max_cset  = (size_t)(available / ShenandoahEvacWaste);
 
@@ -65,7 +68,7 @@ void ShenandoahPassiveHeuristics::choose_collection_set_from_regiondata(Shenando
 
   size_t live_cset = 0;
   for (size_t idx = 0; idx < size; idx++) {
-    ShenandoahHeapRegion* r = data[idx]._region;
+    ShenandoahHeapRegion* r = data[idx].get_region();
     size_t new_cset = live_cset + r->get_live_data_bytes();
     if (new_cset < max_cset && r->garbage() > threshold) {
       live_cset = new_cset;

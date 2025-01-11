@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,17 +39,12 @@ import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import java.security.AccessController;
-
 import javax.management.ObjectName;
 import javax.management.MBeanServer;
 import javax.management.InstanceNotFoundException;
 import javax.management.remote.JMXConnectorFactory;
 import javax.management.remote.JMXConnectorServerFactory;
-import com.sun.jmx.mbeanserver.GetPropertyAction;
 import com.sun.jmx.remote.security.NotificationAccessController;
-import javax.management.remote.JMXConnector;
-import javax.management.remote.JMXConnectorServer;
 
 public class EnvHelp {
 
@@ -267,20 +262,18 @@ public class EnvHelp {
     public static int getNotifBufferSize(Map<String, ?> env) {
         int defaultQueueSize = 1000; // default value
 
-        // keep it for the compability for the fix:
+        // keep it for the compatibility for the fix:
         // 6174229: Environment parameter should be notification.buffer.size
         // instead of buffer.size
         final String oldP = "jmx.remote.x.buffer.size";
 
         // the default value re-specified in the system
         try {
-            GetPropertyAction act = new GetPropertyAction(BUFFER_SIZE_PROPERTY);
-            String s = AccessController.doPrivileged(act);
+            String s = System.getProperty(BUFFER_SIZE_PROPERTY);
             if (s != null) {
                 defaultQueueSize = Integer.parseInt(s);
             } else { // try the old one
-                act = new GetPropertyAction(oldP);
-                s = AccessController.doPrivileged(act);
+                s = System.getProperty(oldP);
                 if (s != null) {
                     defaultQueueSize = Integer.parseInt(s);
                 }
@@ -441,7 +434,7 @@ public class EnvHelp {
             logger.trace("filterAttributes", "starts");
         }
 
-        SortedMap<String, V> map = new TreeMap<String, V>(attributes);
+        SortedMap<String, V> map = new TreeMap<>(attributes);
         purgeUnserializable(map.values());
         hideAttributes(map);
         return map;
@@ -526,9 +519,9 @@ public class EnvHelp {
         "jmx.remote.x.password.file ";
 
     private static final SortedSet<String> defaultHiddenStrings =
-            new TreeSet<String>();
+            new TreeSet<>();
     private static final SortedSet<String> defaultHiddenPrefixes =
-            new TreeSet<String>();
+            new TreeSet<>();
 
     private static void hideAttributes(SortedMap<String, ?> map) {
         if (map.isEmpty())
@@ -543,8 +536,8 @@ public class EnvHelp {
                 hide = hide.substring(1);
             else
                 hide += " " + DEFAULT_HIDDEN_ATTRIBUTES;
-            hiddenStrings = new TreeSet<String>();
-            hiddenPrefixes = new TreeSet<String>();
+            hiddenStrings = new TreeSet<>();
+            hiddenPrefixes = new TreeSet<>();
             parseHiddenAttributes(hide, hiddenStrings, hiddenPrefixes);
         } else {
             hide = DEFAULT_HIDDEN_ATTRIBUTES;
@@ -733,11 +726,11 @@ public class EnvHelp {
      * it removes all the 'null' values from the map.
      */
     public static <K, V> Hashtable<K, V> mapToHashtable(Map<K, V> map) {
-        HashMap<K, V> m = new HashMap<K, V>(map);
-        if (m.containsKey(null)) m.remove(null);
+        HashMap<K, V> m = new HashMap<>(map);
+        m.remove(null);
         for (Iterator<?> i = m.values().iterator(); i.hasNext(); )
             if (i.next() == null) i.remove();
-        return new Hashtable<K, V>(m);
+        return new Hashtable<>(m);
     }
 
     /**

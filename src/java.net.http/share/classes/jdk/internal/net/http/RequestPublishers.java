@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package jdk.internal.net.http;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FilePermission;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -37,11 +36,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.AccessControlContext;
-import java.security.AccessController;
-import java.security.Permission;
-import java.security.PrivilegedActionException;
-import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -53,6 +47,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Flow;
 import java.util.concurrent.Flow.Publisher;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -195,7 +190,7 @@ public final class RequestPublishers {
         @Override
         public long contentLength() {
             if (contentLength == 0) {
-                synchronized(this) {
+                synchronized (this) {
                     if (contentLength == 0) {
                         contentLength = computeLength(content);
                     }
@@ -228,11 +223,6 @@ public final class RequestPublishers {
 
     /**
      * Publishes the content of a given file.
-     * <p>
-     * Privileged actions are performed within a limited doPrivileged that only
-     * asserts the specific, read, file permission that was checked during the
-     * construction of this FilePublisher. This only applies if the file system
-     * that created the file provides interoperability with {@code java.io.File}.
      */
     public static class FilePublisher implements BodyPublisher {
 
@@ -240,62 +230,27 @@ public final class RequestPublishers {
         private final long length;
         private final Function<Path, InputStream> inputStreamSupplier;
 
-        private static String pathForSecurityCheck(Path path) {
-            return path.toFile().getPath();
-        }
-
         /**
          * Factory for creating FilePublisher.
-         *
-         * Permission checks are performed here before construction of the
-         * FilePublisher. Permission checking and construction are deliberately
-         * and tightly co-located.
          */
         public static FilePublisher create(Path path)
                 throws FileNotFoundException {
-            @SuppressWarnings("removal")
-            SecurityManager sm = System.getSecurityManager();
-            FilePermission filePermission = null;
             boolean defaultFS = true;
 
             try {
-                String fn = pathForSecurityCheck(path);
-                if (sm != null) {
-                    FilePermission readPermission = new FilePermission(fn, "read");
-                    sm.checkPermission(readPermission);
-                    filePermission = readPermission;
-                }
+                path.toFile().getPath();
             } catch (UnsupportedOperationException uoe) {
+                // path not associated with the default file system provider
                 defaultFS = false;
-                // Path not associated with the default file system
-                // Test early if an input stream can still be obtained
-                try {
-                    if (sm != null) {
-                        Files.newInputStream(path).close();
-                    }
-                } catch (IOException ioe) {
-                    if (ioe instanceof FileNotFoundException) {
-                        throw (FileNotFoundException) ioe;
-                    } else {
-                        var ex = new FileNotFoundException(ioe.getMessage());
-                        ex.initCause(ioe);
-                        throw ex;
-                    }
-                }
             }
 
-            // existence check must be after permission checks
+            // existence check must be after FS checks
             if (Files.notExists(path))
                 throw new FileNotFoundException(path + " not found");
 
-            Permission perm = filePermission;
-            assert perm == null || perm.getActions().equals("read");
-            @SuppressWarnings("removal")
-            AccessControlContext acc = sm != null ?
-                    AccessController.getContext() : null;
             boolean finalDefaultFS = defaultFS;
             Function<Path, InputStream> inputStreamSupplier = (p) ->
-                    createInputStream(p, acc, perm, finalDefaultFS);
+                    createInputStream(p, finalDefaultFS);
 
             long length;
             try {
@@ -307,39 +262,15 @@ public final class RequestPublishers {
             return new FilePublisher(path, length, inputStreamSupplier);
         }
 
-        @SuppressWarnings("removal")
         private static InputStream createInputStream(Path path,
-                                                     AccessControlContext acc,
-                                                     Permission perm,
                                                      boolean defaultFS) {
             try {
-                if (acc != null) {
-                    PrivilegedExceptionAction<InputStream> pa = defaultFS
-                            ? () -> new FileInputStream(path.toFile())
-                            : () -> Files.newInputStream(path);
-                    return perm != null
-                            ? AccessController.doPrivileged(pa, acc, perm)
-                            : AccessController.doPrivileged(pa, acc);
-                } else {
-                    return defaultFS
+                return defaultFS
                             ? new FileInputStream(path.toFile())
                             : Files.newInputStream(path);
-                }
-            } catch (PrivilegedActionException pae) {
-                throw toUncheckedException(pae.getCause());
             } catch (IOException io) {
                 throw new UncheckedIOException(io);
             }
-        }
-
-        private static RuntimeException toUncheckedException(Throwable t) {
-            if (t instanceof RuntimeException)
-                throw (RuntimeException) t;
-            if (t instanceof Error)
-                throw (Error) t;
-            if (t instanceof IOException)
-                throw new UncheckedIOException((IOException) t);
-            throw new UndeclaredThrowableException(t);
         }
 
         private FilePublisher(Path name,
@@ -387,6 +318,7 @@ public final class RequestPublishers {
         volatile ByteBuffer nextBuffer;
         volatile boolean need2Read = true;
         volatile boolean haveNext;
+        final ReentrantLock stateLock = new ReentrantLock();
 
         StreamIterator(InputStream is) {
             this(is, Utils::getBuffer);
@@ -433,7 +365,16 @@ public final class RequestPublishers {
         }
 
         @Override
-        public synchronized boolean hasNext() {
+        public boolean hasNext() {
+            stateLock.lock();
+            try {
+                return hasNext0();
+            } finally {
+                stateLock.unlock();
+            }
+        }
+
+        private boolean hasNext0() {
             if (need2Read) {
                 try {
                     haveNext = read() != -1;
@@ -454,12 +395,17 @@ public final class RequestPublishers {
         }
 
         @Override
-        public synchronized ByteBuffer next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
+        public ByteBuffer next() {
+            stateLock.lock();
+            try {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                need2Read = true;
+                return nextBuffer;
+            } finally {
+                stateLock.unlock();
             }
-            need2Read = true;
-            return nextBuffer;
         }
 
     }
